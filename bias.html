@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>5x5 Bomb Game — Adaptive</title>
+<style>
+  body { background:#0f172a; color:#e6eef8; font-family:sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; }
+  .app { max-width:960px; width:100%; padding:20px; background:#111827; border-radius:10px; box-shadow:0 0 20px rgba(0,0,0,.5); }
+  .grid { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-top:20px; }
+  .card { background:#1f2937; height:70px; display:flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; font-size:20px; font-weight:bold; color:#94a3b8; }
+  .card.flipped { background:#0b1220; color:#fff; cursor:default; }
+  .bomb { color:#ef4444; }
+  .safe { color:#10b981; }
+</style>
+</head>
+<body>
+<div class="app">
+  <h2>5x5 Bomb Game (5 bombs)</h2>
+  <p>Flip up to 5 cards. Avoid bombs. Tokens virtual only.</p>
+  <p>Tokens: <span id="tokenCount">100</span> | Round: <span id="roundNum">0</span></p>
+  <button id="newRound">New Round (-10 tokens)</button>
+  <button id="renew">Renew (password)</button>
+  <input id="pw" type="password" placeholder="renew password">
+  <button id="claim" disabled>Withdraw 200 (simulation)</button>
+  <div class="grid" id="grid"></div>
+  <p id="status">Ready</p>
+
+  <!-- Disclaimer -->
+  <div style="margin-top:20px; padding:10px; background:#1e293b; border-radius:6px; color:#fefefe; font-size:14px;">
+    <strong>Disclaimer:</strong><br>
+    This is a normal game created for <strong>entertainment and educational purposes only</strong>. 
+    <strong>You do <strong style="font-weight: 900;">not</strong> earn real money or any type of actual currency by playing this game.</strong>
+    It is designed solely for personal use and learning purposes.
+  </div>
+</div>
+
+
+<script>
+const GRID_SIZE = 5;
+const TOTAL_CARDS = GRID_SIZE * GRID_SIZE;
+const NUM_BOMBS = 5;
+const FLIPS_ALLOWED = 5;
+const ROUND_COST = 10;
+const START_TOKENS = 100;
+const WITHDRAW_TOKENS = 200;
+const RENEW_PASSWORD = "renew123";
+
+let tokenCount = START_TOKENS;
+let roundNum = 0;
+let bombIndices = new Set();
+let flipped = 0;
+let roundActive = false;
+
+// DOM
+const gridEl = document.getElementById("grid");
+const tokenEl = document.getElementById("tokenCount");
+const roundEl = document.getElementById("roundNum");
+const statusEl = document.getElementById("status");
+const claimBtn = document.getElementById("claim");
+
+// Linear adaptive win probability
+function shouldPlayerWin(tokens) {
+  const startTokens = START_TOKENS;
+  const endTokens = WITHDRAW_TOKENS;
+  const startWinRate = 0.75; // 75% win chance at start
+  const endWinRate = 0.05;   // 5% win chance at 200
+
+  const slope = (endWinRate - startWinRate) / (endTokens - startTokens);
+  let winProbability = slope * (tokens - startTokens) + startWinRate;
+  winProbability = Math.max(0, Math.min(1, winProbability));
+  return Math.random() < winProbability;
+}
+
+// Place bombs based on bias
+function placeBombs(winBias) {
+  bombIndices = new Set();
+  if (winBias) {
+    while (bombIndices.size < NUM_BOMBS) {
+      let idx = Math.floor(Math.random() * TOTAL_CARDS);
+      if (idx < 5 && bombIndices.size < 1) continue; // safe first flips
+      bombIndices.add(idx);
+    }
+  } else {
+    bombIndices.add(Math.floor(Math.random() * 5)); // force bomb early
+    while (bombIndices.size < NUM_BOMBS) {
+      bombIndices.add(Math.floor(Math.random() * TOTAL_CARDS));
+    }
+  }
+}
+
+// Build grid
+function buildGrid(){
+  gridEl.innerHTML = "";
+  for(let i=0;i<TOTAL_CARDS;i++){
+    const card = document.createElement("div");
+    card.className = "card";
+    card.dataset.index = i;
+    card.textContent = "?";
+    card.onclick = () => flipCard(card);
+    gridEl.appendChild(card);
+  }
+}
+
+// Start new round
+function newRound(){
+  if(roundActive) return;
+  if(tokenCount < ROUND_COST){
+    statusEl.textContent = "Not enough tokens!";
+    return;
+  }
+  tokenCount -= ROUND_COST;
+  roundNum++;
+  flipped = 0;
+  roundActive = true;
+  const bias = shouldPlayerWin(tokenCount);
+  placeBombs(bias);
+  buildGrid();
+  updateUI();
+  statusEl.textContent = `Round ${roundNum} started — avoid ${NUM_BOMBS} bombs`;
+}
+
+// Flip card
+function flipCard(card){
+  if(!roundActive) return;
+  let idx = parseInt(card.dataset.index);
+  if(card.classList.contains("flipped")) return;
+
+  card.classList.add("flipped");
+
+  if(bombIndices.has(idx)){
+    card.textContent = "💣";
+    card.classList.add("bomb");
+    revealRemainingBombs(idx);
+    endRound(false);
+  } else {
+    card.textContent = "💎";
+    card.classList.add("safe");
+    flipped++;
+    if(flipped >= FLIPS_ALLOWED){
+      revealRemainingBombs(); // reveal bombs at round end
+      endRound(true);
+    }
+  }
+}
+
+// Reveal bombs at end or on hit
+function revealRemainingBombs(hitIdx=null){
+  bombIndices.forEach(idx=>{
+    if(idx===hitIdx) return;
+    const card = gridEl.querySelector(`.card[data-index="${idx}"]`);
+    if(!card.classList.contains("flipped")){
+      card.classList.add("flipped","bomb");
+      card.textContent = "💣";
+    }
+  });
+}
+
+// End round
+function endRound(win){
+  roundActive = false;
+  if(win){
+    tokenCount += FLIPS_ALLOWED * 10; // reward 50 tokens
+    statusEl.textContent = `You survived! +${FLIPS_ALLOWED*10} tokens`;
+  } else {
+    statusEl.textContent = "You hit a bomb! Round lost.";
+  }
+  updateUI();
+  if(tokenCount >= WITHDRAW_TOKENS){
+    claimBtn.disabled = false;
+    statusEl.textContent += " — You can withdraw (simulation)";
+  }
+}
+
+// Update UI
+function updateUI(){
+  tokenEl.textContent = tokenCount;
+  roundEl.textContent = roundNum;
+}
+
+// Buttons
+document.getElementById("newRound").onclick = newRound;
+document.getElementById("renew").onclick = ()=>{
+  if(document.getElementById("pw").value === RENEW_PASSWORD){
+    tokenCount = START_TOKENS;
+    roundNum = 0;
+    updateUI();
+    statusEl.textContent = "Tokens renewed!";
+    claimBtn.disabled = true;
+  } else {
+    statusEl.textContent = "Wrong password!";
+  }
+};
+claimBtn.onclick = ()=>{
+  if(tokenCount >= WITHDRAW_TOKENS){
+    alert("Withdraw simulated: 200 tokens (virtual only)");
+    tokenCount = START_TOKENS;
+    roundNum = 0;
+    updateUI();
+    claimBtn.disabled = true;
+  }
+};
+
+buildGrid();
+updateUI();
+</script>
+</body>
+</html>
